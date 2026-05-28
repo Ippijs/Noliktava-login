@@ -310,7 +310,7 @@ $users = app_all_users($pdo);
     </div>
     <div id="toast-container" aria-live="polite" aria-atomic="true"></div>
     <script>
-        // auto-dismiss any inline notices
+
         document.querySelectorAll('[data-auto-dismiss="true"]').forEach((element) => {
             window.setTimeout(() => {
                 element.classList.add('notice-hide');
@@ -339,7 +339,6 @@ $users = app_all_users($pdo);
             if (errorEl && errorEl.textContent.trim() !== '') { showToast(errorEl.textContent.trim(), 'error', 6000); errorEl.remove(); }
         });
 
-        // Toggle mobile-only class to apply mobile fixes without changing desktop
         (function(){
             function toggleMobileClass(){
                 if (window.innerWidth <= 520) document.body.classList.add('mobile-dashboard');
