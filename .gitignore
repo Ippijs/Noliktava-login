@@ -1,0 +1,31 @@
+# PHP / XAMPP
+vendor/
+node_modules/
+.env
+.env.local
+.env.*
+composer.lock
+*.log
+*.sql
+/uploads/
+/.vscode/
+/.idea/
+.DS_Store
+Thumbs.db
+
+# OS files
+*.swp
+*~
+
+# PHPStorm
+/.idea/
+
+# Composer
+vendor/
+
+# Database
+*.sqlite
+
+# Credentials
+secret-*.json
+
