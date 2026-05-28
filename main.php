@@ -9,7 +9,15 @@ if (!isset($_SESSION['user'])) {
 }
 
 $pdo = app_pdo();
-$currentUser = $_SESSION['user'];
+$sessionUser = $_SESSION['user'];
+$currentUser = app_find_user_by_id($pdo, (int) ($sessionUser['id'] ?? 0));
+
+if ($currentUser === null) {
+    session_destroy();
+    header('Location: Login.php');
+    exit;
+}
+
 $message = '';
 $error = '';
 $role = $currentUser['role'] ?? '';
@@ -85,11 +93,80 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'You cannot move items or the request is invalid.';
         }
     }
+
+    if ($error === '' && $action === 'create_order' && in_array($role, ['admin', 'item_manager'], true)) {
+        $customerName = trim($_POST['customer_name'] ?? '');
+        $itemId = (int) ($_POST['order_item_id'] ?? 0);
+        $quantity = (int) ($_POST['order_quantity'] ?? 0);
+        $notes = trim($_POST['order_notes'] ?? '');
+
+        if (app_create_order($pdo, (int) $currentUser['id'], $customerName, $itemId, $quantity, $notes)) {
+            $message = 'Order created successfully.';
+        } else {
+            $error = 'Unable to create order. Check item, quantity, and customer name.';
+        }
+    }
+
+    if ($error === '' && $action === 'accept_order' && in_array($role, ['admin', 'item_manager'], true)) {
+        $orderId = (int) ($_POST['order_id'] ?? 0);
+        if (app_accept_order($pdo, (int) $currentUser['id'], $orderId)) {
+            $message = 'Order accepted.';
+        } else {
+            $error = 'Unable to accept order.';
+        }
+    }
+
+    if ($error === '' && $action === 'fulfill_order' && in_array($role, ['admin', 'item_manager'], true)) {
+        $orderId = (int) ($_POST['order_id'] ?? 0);
+        if (app_fulfill_order($pdo, (int) $currentUser['id'], $orderId)) {
+            $message = 'Order fulfilled and stock updated.';
+        } else {
+            $error = 'Unable to fulfill order. Check available stock and status.';
+        }
+    }
+
+    if ($error === '' && $action === 'close_order' && in_array($role, ['admin', 'item_manager'], true)) {
+        $orderId = (int) ($_POST['order_id'] ?? 0);
+        if (app_close_order($pdo, (int) $currentUser['id'], $orderId)) {
+            $message = 'Order closed.';
+        } else {
+            $error = 'Unable to close order.';
+        }
+    }
+
+    if ($error === '' && $action === 'cancel_order' && in_array($role, ['admin', 'item_manager'], true)) {
+        $orderId = (int) ($_POST['order_id'] ?? 0);
+        if (app_cancel_order($pdo, (int) $currentUser['id'], $orderId)) {
+            $message = 'Order cancelled.';
+        } else {
+            $error = 'Unable to cancel order.';
+        }
+    }
+
+    if ($error === '' && $action === 'delete_order' && in_array($role, ['admin', 'item_manager'], true)) {
+        $orderId = (int) ($_POST['order_id'] ?? 0);
+        if (app_delete_order($pdo, (int) $currentUser['id'], $orderId)) {
+            $message = 'Order deleted.';
+        } else {
+            $error = 'Unable to delete order.';
+        }
+    }
 }
 
 $shelves = app_all_shelves($pdo);
 $items = app_all_items($pdo);
+$orderableItems = array_values(array_filter($items, static function (array $item): bool {
+    return (int) ($item['quantity'] ?? 0) > 0;
+}));
 $users = app_all_users($pdo);
+$orderLimitOptions = [10, 20, 50];
+$ordersLimit = (int) ($_GET['orders_limit'] ?? 10);
+if (!in_array($ordersLimit, $orderLimitOptions, true)) {
+    $ordersLimit = 10;
+}
+$orders = app_all_orders($pdo, $ordersLimit);
+$ordersTotal = (int) $pdo->query('SELECT COUNT(*) FROM `orders`')->fetchColumn();
+$orderReport = app_order_report_summary($pdo);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -99,7 +176,7 @@ $users = app_all_users($pdo);
     <title>Main Page</title>
     <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="dashboard-page">
     <div class="wrap">
         <div class="hero">
             <div class="topbar">
@@ -164,11 +241,11 @@ $users = app_all_users($pdo);
                                 <tbody>
                                     <?php foreach ($items as $item): ?>
                                         <tr>
-                                            <td><?php echo htmlspecialchars((string) $item['id']); ?></td>
-                                            <td><?php echo htmlspecialchars($item['item_name']); ?></td>
-                                            <td><?php echo htmlspecialchars((string) $item['quantity']); ?></td>
-                                            <td><?php echo htmlspecialchars($item['shelf_name']); ?></td>
-                                            <td><?php echo htmlspecialchars($item['created_at']); ?></td>
+                                                <td data-label="ID"><?php echo htmlspecialchars((string) $item['id']); ?></td>
+                                                <td data-label="Item"><?php echo htmlspecialchars($item['item_name']); ?></td>
+                                                <td data-label="Quantity"><?php echo htmlspecialchars((string) $item['quantity']); ?></td>
+                                                <td data-label="Shelf"><?php echo htmlspecialchars($item['shelf_name']); ?></td>
+                                                <td data-label="Created"><?php echo htmlspecialchars($item['created_at']); ?></td>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>
@@ -179,7 +256,7 @@ $users = app_all_users($pdo);
                     <?php endif; ?>
                 </div>
 
-                <div class="card">
+                <div class="card item-management-card">
                     <h2>Item Actions</h2>
 
                     <div class="inventory-grid">
@@ -257,6 +334,153 @@ $users = app_all_users($pdo);
                     <?php endif; ?>
                 </div>
 
+                <?php if (in_array($role, ['admin', 'item_manager'], true)): ?>
+                    <div class="card">
+                        <h2>Order Management</h2>
+                        <p class="muted">Create, accept, fulfill, and close warehouse orders.</p>
+
+                        <?php if (count($orderableItems) > 0): ?>
+                            <form method="post" class="stack">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
+                                <input type="hidden" name="action" value="create_order">
+                                <div class="field">
+                                    <label for="customer_name">Customer / Destination</label>
+                                    <input id="customer_name" name="customer_name" type="text" minlength="2" maxlength="120" required>
+                                </div>
+                                <div class="compact">
+                                    <div class="field">
+                                        <label for="order_item_id">Item</label>
+                                        <select id="order_item_id" name="order_item_id" required>
+                                            <?php foreach ($orderableItems as $item): ?>
+                                                <option value="<?php echo htmlspecialchars((string) $item['id']); ?>"><?php echo htmlspecialchars($item['item_name'] . ' (' . $item['quantity'] . ' on ' . $item['shelf_name'] . ')'); ?></option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                    <div class="field">
+                                        <label for="order_quantity">Quantity</label>
+                                        <input id="order_quantity" name="order_quantity" type="number" min="1" max="1000000" value="1" required>
+                                    </div>
+                                </div>
+                                <div class="field">
+                                    <label for="order_notes">Notes (optional)</label>
+                                    <input id="order_notes" name="order_notes" type="text" maxlength="255">
+                                </div>
+                                <button type="submit">Create Order</button>
+                            </form>
+                        <?php else: ?>
+                            <div class="empty">No available stock items to create a new order.</div>
+                        <?php endif; ?>
+
+                        <div class="stack" style="margin-top: 16px;">
+                            <div class="panel-note">
+                                Status summary: Created <?php echo htmlspecialchars((string) $orderReport['status_counts']['created']); ?>,
+                                Accepted <?php echo htmlspecialchars((string) $orderReport['status_counts']['accepted']); ?>,
+                                Fulfilled <?php echo htmlspecialchars((string) $orderReport['status_counts']['fulfilled']); ?>,
+                                Closed <?php echo htmlspecialchars((string) $orderReport['status_counts']['closed']); ?>,
+                                Cancelled <?php echo htmlspecialchars((string) $orderReport['status_counts']['cancelled']); ?>.
+                                Fulfilled this month: <?php echo htmlspecialchars((string) $orderReport['fulfilled_this_month']); ?>,
+                                Delivered quantity total: <?php echo htmlspecialchars((string) $orderReport['delivered_quantity_total']); ?>.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h2>Orders Table</h2>
+                        <form method="get" class="actions-row" style="margin-bottom: 12px;">
+                            <label for="orders_limit" style="margin: 0;">Rows</label>
+                            <select id="orders_limit" name="orders_limit" style="max-width: 140px;" onchange="this.form.submit()">
+                                <?php foreach ($orderLimitOptions as $limitOption): ?>
+                                    <option value="<?php echo htmlspecialchars((string) $limitOption); ?>" <?php echo $ordersLimit === $limitOption ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars((string) $limitOption); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <noscript><button type="submit">Apply</button></noscript>
+                        </form>
+                        <?php if ($ordersTotal > $ordersLimit): ?>
+                            <p class="muted">Showing latest <?php echo htmlspecialchars((string) $ordersLimit); ?> of <?php echo htmlspecialchars((string) $ordersTotal); ?> orders.</p>
+                        <?php endif; ?>
+                        <?php if (count($orders) > 0): ?>
+                            <div class="table-wrap">
+                                <table class="orders-table">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Customer</th>
+                                            <th>Item</th>
+                                            <th>Qty</th>
+                                            <th>Status</th>
+                                            <th>Notes</th>
+                                            <th>Created</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($orders as $order): ?>
+                                            <tr>
+                                                <td data-label="ID"><?php echo htmlspecialchars((string) $order['id']); ?></td>
+                                                <td data-label="Customer"><?php echo htmlspecialchars($order['customer_name']); ?></td>
+                                                <td data-label="Item"><?php echo htmlspecialchars(($order['item_name'] ?? 'Removed item') . (($order['shelf_name'] ?? '') !== '' ? ' @ ' . $order['shelf_name'] : '')); ?></td>
+                                                <td data-label="Qty"><?php echo htmlspecialchars((string) $order['quantity']); ?></td>
+                                                <td data-label="Status"><span class="badge <?php echo htmlspecialchars((string) $order['status']); ?>"><?php echo htmlspecialchars((string) $order['status']); ?></span></td>
+                                                <td data-label="Notes"><?php echo htmlspecialchars((string) ($order['notes'] ?? '')); ?></td>
+                                                <td data-label="Created"><span class="order-created"><?php echo htmlspecialchars((string) $order['created_at']); ?></span></td>
+                                                <td data-label="Action">
+                                                    <?php if ($order['status'] === 'created'): ?>
+                                                        <form method="post" class="stack">
+                                                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
+                                                            <input type="hidden" name="action" value="accept_order">
+                                                            <input type="hidden" name="order_id" value="<?php echo htmlspecialchars((string) $order['id']); ?>">
+                                                            <button type="submit">Accept</button>
+                                                        </form>
+                                                        <form method="post" class="stack" style="margin-top: 8px;">
+                                                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
+                                                            <input type="hidden" name="action" value="cancel_order">
+                                                            <input type="hidden" name="order_id" value="<?php echo htmlspecialchars((string) $order['id']); ?>">
+                                                            <button type="submit" class="secondary">Cancel</button>
+                                                        </form>
+                                                    <?php elseif ($order['status'] === 'accepted'): ?>
+                                                        <form method="post" class="stack">
+                                                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
+                                                            <input type="hidden" name="action" value="fulfill_order">
+                                                            <input type="hidden" name="order_id" value="<?php echo htmlspecialchars((string) $order['id']); ?>">
+                                                            <button type="submit">Fulfill</button>
+                                                        </form>
+                                                        <form method="post" class="stack" style="margin-top: 8px;">
+                                                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
+                                                            <input type="hidden" name="action" value="cancel_order">
+                                                            <input type="hidden" name="order_id" value="<?php echo htmlspecialchars((string) $order['id']); ?>">
+                                                            <button type="submit" class="secondary">Cancel</button>
+                                                        </form>
+                                                    <?php elseif ($order['status'] === 'fulfilled'): ?>
+                                                        <form method="post" class="stack">
+                                                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
+                                                            <input type="hidden" name="action" value="close_order">
+                                                            <input type="hidden" name="order_id" value="<?php echo htmlspecialchars((string) $order['id']); ?>">
+                                                            <button type="submit">Close</button>
+                                                        </form>
+                                                    <?php else: ?>
+                                                        <span class="muted">No actions</span>
+                                                    <?php endif; ?>
+
+                                                    <form method="post" class="stack" style="margin-top: 8px;" onsubmit="return confirm('Delete this order? This cannot be undone.');">
+                                                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
+                                                        <input type="hidden" name="action" value="delete_order">
+                                                        <input type="hidden" name="order_id" value="<?php echo htmlspecialchars((string) $order['id']); ?>">
+                                                        <button type="submit" class="danger">Delete</button>
+                                                    </form>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        <?php else: ?>
+                            <div class="empty">No orders found.</div>
+                        <?php endif; ?>
+                    </div>
+                <?php endif; ?>
+
                 <?php if ($role === 'admin'): ?>
                     <div class="card">
                         <h2>Accounts Table</h2>
@@ -275,15 +499,15 @@ $users = app_all_users($pdo);
                                     <tbody>
                                         <?php foreach ($users as $user): ?>
                                             <tr>
-                                                <td><?php echo htmlspecialchars((string) $user['id']); ?></td>
-                                                <td><?php echo htmlspecialchars($user['username']); ?></td>
-                                                <td>
+                                                        <td data-label="ID"><?php echo htmlspecialchars((string) $user['id']); ?></td>
+                                                        <td data-label="Username"><?php echo htmlspecialchars($user['username']); ?></td>
+                                                        <td data-label="Role">
                                                     <span class="badge <?php echo ($user['role'] === 'admin') ? 'admin' : ''; ?>">
                                                         <?php echo htmlspecialchars($user['role']); ?>
                                                     </span>
                                                 </td>
-                                                <td><?php echo htmlspecialchars($user['created_at']); ?></td>
-                                                <td>
+                                                        <td data-label="Created"><?php echo htmlspecialchars($user['created_at']); ?></td>
+                                                        <td data-label="Action">
                                                     <?php if ((int) $user['id'] === (int) $currentUser['id']): ?>
                                                         <span class="muted">Current User</span>
                                                     <?php else: ?>
@@ -339,14 +563,6 @@ $users = app_all_users($pdo);
             if (errorEl && errorEl.textContent.trim() !== '') { showToast(errorEl.textContent.trim(), 'error', 6000); errorEl.remove(); }
         });
 
-        (function(){
-            function toggleMobileClass(){
-                if (window.innerWidth <= 520) document.body.classList.add('mobile-dashboard');
-                else document.body.classList.remove('mobile-dashboard');
-            }
-            window.addEventListener('resize', toggleMobileClass);
-            toggleMobileClass();
-        })();
     </script>
 </body>
 </html>

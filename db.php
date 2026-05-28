@@ -54,6 +54,54 @@ function app_pdo(): PDO
         );
 
         $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS `orders` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `customer_name` VARCHAR(120) NOT NULL,
+                `item_id` INT UNSIGNED NULL,
+                `quantity` INT UNSIGNED NOT NULL,
+                `status` ENUM('created', 'accepted', 'fulfilled', 'closed', 'cancelled') NOT NULL DEFAULT 'created',
+                `notes` VARCHAR(255) NULL,
+                `created_by` INT UNSIGNED NULL,
+                `accepted_by` INT UNSIGNED NULL,
+                `fulfilled_by` INT UNSIGNED NULL,
+                `closed_by` INT UNSIGNED NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `accepted_at` TIMESTAMP NULL DEFAULT NULL,
+                `fulfilled_at` TIMESTAMP NULL DEFAULT NULL,
+                `closed_at` TIMESTAMP NULL DEFAULT NULL,
+                PRIMARY KEY (`id`),
+                CONSTRAINT `fk_orders_item` FOREIGN KEY (`item_id`) REFERENCES `items` (`id`) ON UPDATE CASCADE ON DELETE SET NULL,
+                CONSTRAINT `fk_orders_created_by` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON UPDATE CASCADE ON DELETE SET NULL,
+                CONSTRAINT `fk_orders_accepted_by` FOREIGN KEY (`accepted_by`) REFERENCES `users` (`id`) ON UPDATE CASCADE ON DELETE SET NULL,
+                CONSTRAINT `fk_orders_fulfilled_by` FOREIGN KEY (`fulfilled_by`) REFERENCES `users` (`id`) ON UPDATE CASCADE ON DELETE SET NULL,
+                CONSTRAINT `fk_orders_closed_by` FOREIGN KEY (`closed_by`) REFERENCES `users` (`id`) ON UPDATE CASCADE ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
+
+        $ordersRule = $pdo->prepare(
+            "SELECT rc.DELETE_RULE, col.IS_NULLABLE
+             FROM information_schema.REFERENTIAL_CONSTRAINTS rc
+             INNER JOIN information_schema.COLUMNS col
+                     ON col.TABLE_SCHEMA = rc.CONSTRAINT_SCHEMA
+                    AND col.TABLE_NAME = rc.TABLE_NAME
+                    AND col.COLUMN_NAME = 'item_id'
+             WHERE rc.CONSTRAINT_SCHEMA = DATABASE()
+               AND rc.TABLE_NAME = 'orders'
+               AND rc.CONSTRAINT_NAME = 'fk_orders_item'
+             LIMIT 1"
+        );
+        $ordersRule->execute();
+        $ordersRuleData = $ordersRule->fetch();
+
+        if (!$ordersRuleData || (string) $ordersRuleData['DELETE_RULE'] !== 'SET NULL' || (string) $ordersRuleData['IS_NULLABLE'] !== 'YES') {
+            $pdo->exec('ALTER TABLE `orders` DROP FOREIGN KEY `fk_orders_item`');
+            $pdo->exec('ALTER TABLE `orders` MODIFY `item_id` INT UNSIGNED NULL');
+            $pdo->exec(
+                'ALTER TABLE `orders` ADD CONSTRAINT `fk_orders_item` FOREIGN KEY (`item_id`) REFERENCES `items` (`id`) ON UPDATE CASCADE ON DELETE SET NULL'
+            );
+        }
+
+        $pdo->exec(
             "CREATE TABLE IF NOT EXISTS `item_movements` (
                 `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
                 `item_id` INT UNSIGNED NULL,
@@ -246,6 +294,11 @@ function app_can_manage_items(PDO $pdo, int $userId): bool
     return in_array(app_user_role($pdo, $userId), ['admin', 'item_manager'], true);
 }
 
+function app_can_manage_orders(PDO $pdo, int $userId): bool
+{
+    return in_array(app_user_role($pdo, $userId), ['admin', 'item_manager'], true);
+}
+
 function app_can_move_items(PDO $pdo, int $userId): bool
 {
     return in_array(app_user_role($pdo, $userId), ['admin', 'shelf_staff'], true);
@@ -434,4 +487,283 @@ function app_delete_user(PDO $pdo, int $actorUserId, int $targetUserId): bool
     $statement = $pdo->prepare('DELETE FROM `users` WHERE `id` = :id LIMIT 1');
 
     return $statement->execute(['id' => $targetUserId]);
+}
+
+function app_find_order(PDO $pdo, int $orderId): ?array
+{
+    $statement = $pdo->prepare('SELECT * FROM `orders` WHERE `id` = :id LIMIT 1');
+    $statement->execute(['id' => $orderId]);
+    $order = $statement->fetch();
+
+    return $order ?: null;
+}
+
+function app_all_orders(PDO $pdo, int $limit = 30): array
+{
+    if ($limit < 1) {
+        $limit = 1;
+    }
+    if ($limit > 200) {
+        $limit = 200;
+    }
+
+    $statement = $pdo->prepare(
+        'SELECT o.`id`, o.`customer_name`, o.`quantity`, o.`status`, o.`notes`, o.`created_at`,
+                i.`id` AS `item_id`, i.`item_name`, i.`shelf_id`, s.`shelf_name`,
+                cu.`username` AS `created_by_name`,
+                au.`username` AS `accepted_by_name`,
+                fu.`username` AS `fulfilled_by_name`,
+                clu.`username` AS `closed_by_name`
+         FROM `orders` o
+         LEFT JOIN `items` i ON i.`id` = o.`item_id`
+         LEFT JOIN `shelves` s ON s.`id` = i.`shelf_id`
+         LEFT JOIN `users` cu ON cu.`id` = o.`created_by`
+         LEFT JOIN `users` au ON au.`id` = o.`accepted_by`
+         LEFT JOIN `users` fu ON fu.`id` = o.`fulfilled_by`
+         LEFT JOIN `users` clu ON clu.`id` = o.`closed_by`
+         ORDER BY o.`id` DESC
+         LIMIT :limit'
+    );
+    $statement->bindValue(':limit', $limit, PDO::PARAM_INT);
+    $statement->execute();
+
+    return $statement->fetchAll();
+}
+
+function app_create_order(PDO $pdo, int $userId, string $customerName, int $itemId, int $quantity, string $notes = ''): bool
+{
+    if (!app_can_manage_orders($pdo, $userId)) {
+        return false;
+    }
+
+    $customerName = trim($customerName);
+    if ($customerName === '' || strlen($customerName) > 120 || !app_is_valid_quantity($quantity)) {
+        return false;
+    }
+
+    $item = app_find_item($pdo, $itemId);
+    if (!$item) {
+        return false;
+    }
+
+    $statement = $pdo->prepare(
+        'INSERT INTO `orders` (`customer_name`, `item_id`, `quantity`, `status`, `notes`, `created_by`)
+         VALUES (:customer_name, :item_id, :quantity, :status, :notes, :created_by)'
+    );
+
+    return $statement->execute([
+        'customer_name' => $customerName,
+        'item_id' => $itemId,
+        'quantity' => $quantity,
+        'status' => 'created',
+        'notes' => trim($notes) !== '' ? trim($notes) : null,
+        'created_by' => $userId,
+    ]);
+}
+
+function app_accept_order(PDO $pdo, int $userId, int $orderId): bool
+{
+    if (!app_can_manage_orders($pdo, $userId)) {
+        return false;
+    }
+
+    $order = app_find_order($pdo, $orderId);
+    if (!$order || ($order['status'] ?? '') !== 'created') {
+        return false;
+    }
+
+    $statement = $pdo->prepare(
+        'UPDATE `orders`
+         SET `status` = :status, `accepted_by` = :accepted_by, `accepted_at` = CURRENT_TIMESTAMP
+         WHERE `id` = :id AND `status` = :expected_status'
+    );
+
+    $statement->execute([
+        'status' => 'accepted',
+        'accepted_by' => $userId,
+        'id' => $orderId,
+        'expected_status' => 'created',
+    ]);
+
+    return $statement->rowCount() === 1;
+}
+
+function app_fulfill_order(PDO $pdo, int $userId, int $orderId): bool
+{
+    if (!app_can_manage_orders($pdo, $userId)) {
+        return false;
+    }
+
+    $order = app_find_order($pdo, $orderId);
+    if (!$order || ($order['status'] ?? '') !== 'accepted') {
+        return false;
+    }
+
+    $item = app_find_item($pdo, (int) $order['item_id']);
+    if (!$item || (int) $item['quantity'] < (int) $order['quantity']) {
+        return false;
+    }
+
+    $pdo->beginTransaction();
+
+    try {
+        $requestedQty = (int) $order['quantity'];
+        $remainingQty = (int) $item['quantity'] - $requestedQty;
+
+        if ($remainingQty > 0) {
+            $updateItem = $pdo->prepare('UPDATE `items` SET `quantity` = :quantity WHERE `id` = :id');
+            $updateItem->execute([
+                'quantity' => $remainingQty,
+                'id' => (int) $item['id'],
+            ]);
+            $itemLogId = (int) $item['id'];
+        } else {
+            $itemLogId = null;
+        }
+
+        $updateOrder = $pdo->prepare(
+            'UPDATE `orders`
+             SET `status` = :status, `fulfilled_by` = :fulfilled_by, `fulfilled_at` = CURRENT_TIMESTAMP
+             WHERE `id` = :id AND `status` = :expected_status'
+        );
+        $updateOrder->execute([
+            'status' => 'fulfilled',
+            'fulfilled_by' => $userId,
+            'id' => $orderId,
+            'expected_status' => 'accepted',
+        ]);
+
+        if ($updateOrder->rowCount() !== 1) {
+            $pdo->rollBack();
+            return false;
+        }
+
+        $log = $pdo->prepare(
+            'INSERT INTO `item_movements` (`item_id`, `action`, `from_shelf_id`, `quantity`, `acted_by`)
+             VALUES (:item_id, :action, :from_shelf_id, :quantity, :acted_by)'
+        );
+        $log->execute([
+            'item_id' => $itemLogId,
+            'action' => 'remove',
+            'from_shelf_id' => $item['shelf_id'],
+            'quantity' => $requestedQty,
+            'acted_by' => $userId,
+        ]);
+
+        $pdo->commit();
+        return true;
+    } catch (Throwable $throwable) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        return false;
+    }
+}
+
+function app_close_order(PDO $pdo, int $userId, int $orderId): bool
+{
+    if (!app_can_manage_orders($pdo, $userId)) {
+        return false;
+    }
+
+    $order = app_find_order($pdo, $orderId);
+    if (!$order || ($order['status'] ?? '') !== 'fulfilled') {
+        return false;
+    }
+
+    $statement = $pdo->prepare(
+        'UPDATE `orders`
+         SET `status` = :status, `closed_by` = :closed_by, `closed_at` = CURRENT_TIMESTAMP
+         WHERE `id` = :id AND `status` = :expected_status'
+    );
+
+    $statement->execute([
+        'status' => 'closed',
+        'closed_by' => $userId,
+        'id' => $orderId,
+        'expected_status' => 'fulfilled',
+    ]);
+
+    return $statement->rowCount() === 1;
+}
+
+function app_cancel_order(PDO $pdo, int $userId, int $orderId): bool
+{
+    if (!app_can_manage_orders($pdo, $userId)) {
+        return false;
+    }
+
+    $order = app_find_order($pdo, $orderId);
+    if (!$order || !in_array((string) ($order['status'] ?? ''), ['created', 'accepted'], true)) {
+        return false;
+    }
+
+    $statement = $pdo->prepare(
+        'UPDATE `orders` SET `status` = :status, `closed_by` = :closed_by, `closed_at` = CURRENT_TIMESTAMP
+         WHERE `id` = :id AND `status` IN (\'created\', \'accepted\')'
+    );
+
+    $statement->execute([
+        'status' => 'cancelled',
+        'closed_by' => $userId,
+        'id' => $orderId,
+    ]);
+
+    return $statement->rowCount() === 1;
+}
+
+function app_delete_order(PDO $pdo, int $userId, int $orderId): bool
+{
+    if (!app_can_manage_orders($pdo, $userId)) {
+        return false;
+    }
+
+    if ($orderId <= 0 || !app_find_order($pdo, $orderId)) {
+        return false;
+    }
+
+    $statement = $pdo->prepare('DELETE FROM `orders` WHERE `id` = :id LIMIT 1');
+    $statement->execute(['id' => $orderId]);
+
+    return $statement->rowCount() === 1;
+}
+
+function app_order_report_summary(PDO $pdo): array
+{
+    $statusCounts = [
+        'created' => 0,
+        'accepted' => 0,
+        'fulfilled' => 0,
+        'closed' => 0,
+        'cancelled' => 0,
+    ];
+
+    $rows = $pdo->query('SELECT `status`, COUNT(*) AS `count` FROM `orders` GROUP BY `status`')->fetchAll();
+    foreach ($rows as $row) {
+        $status = (string) ($row['status'] ?? '');
+        if (array_key_exists($status, $statusCounts)) {
+            $statusCounts[$status] = (int) $row['count'];
+        }
+    }
+
+    $fulfilledThisMonth = (int) $pdo->query(
+        'SELECT COUNT(*)
+         FROM `orders`
+         WHERE `status` IN (\'fulfilled\', \'closed\')
+           AND YEAR(`fulfilled_at`) = YEAR(CURRENT_DATE)
+           AND MONTH(`fulfilled_at`) = MONTH(CURRENT_DATE)'
+    )->fetchColumn();
+
+    $totalDeliveredQty = (int) $pdo->query(
+        'SELECT COALESCE(SUM(`quantity`), 0)
+         FROM `orders`
+         WHERE `status` IN (\'fulfilled\', \'closed\')'
+    )->fetchColumn();
+
+    return [
+        'status_counts' => $statusCounts,
+        'fulfilled_this_month' => $fulfilledThisMonth,
+        'delivered_quantity_total' => $totalDeliveredQty,
+    ];
 }

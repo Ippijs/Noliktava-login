@@ -19,18 +19,14 @@ body {
     margin: 0;
     min-height: 100vh;
     font-family: Arial, Helvetica, sans-serif;
-    background:
-        radial-gradient(circle at top left, rgba(56, 189, 248, 0.18), transparent 28%),
-        radial-gradient(circle at bottom right, rgba(34, 197, 94, 0.16), transparent 30%),
-        var(--bg);
+    background: var(--bg);
     color: var(--text);
     padding: 24px;
 }
 
 .wrap {
     width: 100%;
-    /* Reactive max width: grows with viewport but caps at 1100px */
-    max-width: clamp(320px, 96vw, 1100px);
+    max-width: 1100px;
     margin: 0 auto;
     display: grid;
     gap: 20px;
@@ -74,8 +70,7 @@ body {
 .grid,
 .inventory-grid {
     display: grid;
-    /* First column (sidebar) is reactive: uses viewport fraction but clamps between sensible px sizes */
-    grid-template-columns: minmax(120px, clamp(160px, 36vw, 360px)) 1fr;
+    grid-template-columns: 320px 1fr;
     gap: 20px;
     align-items: start;
 }
@@ -222,7 +217,7 @@ td form .danger {
 }
 
 .table-wrap {
-    overflow-x: auto;
+    overflow-x: hidden;
 }
 
 table {
@@ -230,6 +225,87 @@ table {
     border-collapse: collapse;
     overflow: hidden;
     border-radius: 16px;
+}
+
+.orders-table {
+    table-layout: fixed;
+    width: 100%;
+    min-width: 0;
+}
+
+.orders-table th,
+.orders-table td {
+    vertical-align: top;
+    overflow-wrap: normal;
+    word-break: normal;
+}
+
+.orders-table th:nth-child(1),
+.orders-table td:nth-child(1) { width: 46px; }
+.orders-table th:nth-child(2),
+.orders-table td:nth-child(2) {
+    width: 92px;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+.orders-table th:nth-child(3),
+.orders-table td:nth-child(3) {
+    width: 92px;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+.orders-table th:nth-child(4),
+.orders-table td:nth-child(4) { width: 46px; text-align: center; }
+.orders-table th:nth-child(5),
+.orders-table td:nth-child(5) { width: 78px; }
+.orders-table th:nth-child(6),
+.orders-table td:nth-child(6) {
+    width: 130px;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+.orders-table th:nth-child(7),
+.orders-table td:nth-child(7) {
+    width: 150px;
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
+}
+.orders-table th:nth-child(8),
+.orders-table td:nth-child(8) { width: 106px; }
+
+.orders-table .badge {
+    max-width: 100%;
+    white-space: normal;
+    line-height: 1.2;
+}
+
+.orders-table td .stack {
+    gap: 8px;
+}
+
+.orders-table td .stack button {
+    min-width: 0;
+}
+
+body.dashboard-page {
+    padding-left: 12px;
+    padding-right: 12px;
+}
+
+body.dashboard-page .wrap {
+    max-width: 940px;
+    padding: 0 8px;
+}
+
+body.dashboard-page .grid {
+    grid-template-columns: 270px minmax(0, 1fr);
+}
+
+.order-created {
+    display: inline-block;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
 }
 
 th,
@@ -279,6 +355,57 @@ td {
 .badge.add {
     background: rgba(96, 165, 250, 0.16);
     color: #bfdbfe;
+}
+
+.badge.created {
+    background: transparent;
+    color: #ffffff;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    border-radius: 0;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.2;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+
+
+.badge.accepted {
+    background: rgba(245, 158, 11, 0.16);
+    color: #fcd34d;
+}
+
+.badge.fulfilled {
+    background: rgba(34, 197, 94, 0.16);
+    color: #bbf7d0;
+}
+
+.badge.closed {
+    background: rgba(148, 163, 184, 0.2);
+    color: #e2e8f0;
+}
+
+.badge.cancelled {
+    background: rgba(239, 68, 68, 0.16);
+    color: #fecaca;
+}
+
+.item-management-card {
+    max-width: 100%;
+    width: 100%;
+}
+
+.item-management-card .inventory-grid {
+    grid-template-columns: 1fr;
+    max-width: 680px;
+    margin: 0 auto;
+}
+
+.item-management-card form {
+    max-width: 100%;
 }
 
 .stack {
@@ -350,17 +477,94 @@ td {
     .card { padding: 14px; }
     input, select, button, .button { padding: 12px; font-size: 16px; }
     .actions button, .actions .button { min-width: 0; flex: 1 1 100%; }
+    .topbar,
+    .split,
+    .actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .topbar > div:last-child,
+    .split > div:last-child {
+        width: 100%;
+    }
+    .topbar .button,
+    .split .button,
+    .actions .button,
+    .actions button {
+        width: 100%;
+    }
+    .compact {
+        grid-template-columns: 1fr;
+    }
+
+    .dashboard-page .table-wrap {
+        overflow: visible;
+    }
+
+    .dashboard-page table,
+    .dashboard-page thead,
+    .dashboard-page tbody,
+    .dashboard-page th,
+    .dashboard-page td,
+    .dashboard-page tr {
+        display: block;
+        width: 100%;
+    }
+
+    .dashboard-page thead {
+        display: none;
+    }
+
+    .dashboard-page tr {
+        margin-bottom: 12px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.03);
+    }
+
+    .dashboard-page td {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+        text-align: right;
+    }
+
+    .dashboard-page td::before {
+        content: attr(data-label);
+        font-weight: 700;
+        color: var(--muted);
+        text-align: left;
+        flex: 0 0 38%;
+        max-width: 38%;
+    }
+
+    .dashboard-page td:last-child {
+        border-bottom: none;
+    }
+
+    .dashboard-page td form,
+    .dashboard-page td .button,
+    .dashboard-page td button {
+        width: 100%;
+    }
 }
 
 @media (max-width: 480px) {
     html, body { width: 100%; }
     body { padding: 12px 0; }
-    .wrap { max-width: 100% !important; padding: 0 12px !important; margin: 0 auto; }
-    .grid, .inventory-grid { grid-template-columns: 1fr !important; gap: 14px; }
+    .wrap { max-width: 100%; padding: 0 10px; margin: 0 auto; }
+    .grid, .inventory-grid { grid-template-columns: 1fr; gap: 12px; }
     .card, .hero { width: 100%; box-shadow: 0 14px 40px rgba(0,0,0,0.22); }
+    .hero { padding: 16px; }
+    .card { padding: 12px; }
     .hero h1 { font-size: 20px; }
     .table-wrap { overflow-x: auto; }
     table { font-size: 13px; }
+    th, td { padding: 10px 10px; }
 }
 
 .mobile-dashboard .wrap { max-width: 100% !important; width: 100% !important; padding-left: 12px !important; padding-right: 12px !important; margin: 0 !important; }

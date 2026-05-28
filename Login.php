@@ -58,7 +58,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="grid">
             <div class="card">
                 <h2>Sign In</h2>
-                <p class="muted">Default admin: admin / admin123</p>
 
                 <?php if ($error !== ''): ?>
                     <div class="error"><?php echo htmlspecialchars($error); ?></div>
