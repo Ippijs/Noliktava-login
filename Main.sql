@@ -1,0 +1,49 @@
+CREATE DATABASE IF NOT EXISTS `noliktava_login` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE `noliktava_login`;
+
+CREATE TABLE IF NOT EXISTS `users` (
+	`id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+	`username` VARCHAR(50) NOT NULL UNIQUE,
+	`password` VARCHAR(255) NOT NULL,
+	`role` ENUM('admin', 'item_manager', 'shelf_staff') NOT NULL DEFAULT 'shelf_staff',
+	`created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `shelves` (
+	`id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+	`shelf_name` VARCHAR(50) NOT NULL UNIQUE,
+	`created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `items` (
+	`id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+	`item_name` VARCHAR(120) NOT NULL,
+	`quantity` INT UNSIGNED NOT NULL DEFAULT 1,
+	`shelf_id` INT UNSIGNED NOT NULL,
+	`created_by` INT UNSIGNED NULL,
+	`created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	`updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+	PRIMARY KEY (`id`),
+	CONSTRAINT `fk_items_shelf` FOREIGN KEY (`shelf_id`) REFERENCES `shelves` (`id`) ON UPDATE CASCADE ON DELETE RESTRICT,
+	CONSTRAINT `fk_items_user` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `item_movements` (
+	`id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+	`item_id` INT UNSIGNED NOT NULL,
+	`action` ENUM('add', 'remove', 'move') NOT NULL,
+	`from_shelf_id` INT UNSIGNED NULL,
+	`to_shelf_id` INT UNSIGNED NULL,
+	`quantity` INT UNSIGNED NOT NULL DEFAULT 1,
+	`acted_by` INT UNSIGNED NULL,
+	`created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY (`id`),
+	CONSTRAINT `fk_movements_item` FOREIGN KEY (`item_id`) REFERENCES `items` (`id`) ON UPDATE CASCADE ON DELETE CASCADE,
+	CONSTRAINT `fk_movements_from_shelf` FOREIGN KEY (`from_shelf_id`) REFERENCES `shelves` (`id`) ON UPDATE CASCADE ON DELETE SET NULL,
+	CONSTRAINT `fk_movements_to_shelf` FOREIGN KEY (`to_shelf_id`) REFERENCES `shelves` (`id`) ON UPDATE CASCADE ON DELETE SET NULL,
+	CONSTRAINT `fk_movements_user` FOREIGN KEY (`acted_by`) REFERENCES `users` (`id`) ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO `shelves` (`shelf_name`) VALUES ('A1'), ('A2'), ('B1'), ('B2'), ('C1');
